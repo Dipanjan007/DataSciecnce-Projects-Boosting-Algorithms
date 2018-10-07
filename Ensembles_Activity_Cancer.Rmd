@@ -1,0 +1,661 @@
+---
+title: "Using Ensembles to Predict Cancer"
+author: "Dipanjan"
+date: "10 June 2018"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+**NOTE** Before starting this assignment please remember to clear your environment, you can do that by running the following code chunk
+
+```{r}
+
+rm(list = ls(all=TRUE))
+
+```
+
+**NOTE** Be careful with moving back and forth the various sections in this assignment as we will be building a lot of models and unexpected things might happen if you don't carefully handle the objects in your global environment
+
+## Agenda 
+
+* Read in the data
+
+* Data Pre-processing
+
+* Build Multiple Models
+
+* Stack 'em up
+
+* Report Metrics of the various Models on Test Data
+
+# Reading & Understanding the Data
+
+* Read in the .csv file
+
+```{r}
+
+# change your working directory using the "setwd()" function, if your dataset is located elsewhere
+
+cancer_data <- read.csv("cancer_diagnosis.csv")
+
+```
+
+* Get a feel for the data using the str() function 
+
+```{r}
+
+str(cancer_data)
+
+```
+
+The dataset has 569 observations with 32 variables, the descriptions of the variables are given below :
+
+1) **id** : Unique identification number of the sample
+
+2) **Cancer** : This column represents whether the patient has a benign/normal tumor (0) or a cancerous one ("1")
+
+3) **The remaining 30 variables** are real valued measurements some of which are given below:
+
+	* radius (mean of distances from center to points on the perimeter)
+	* texture (standard deviation of gray-scale values)
+	* perimeter
+	* area
+	* smoothness (local variation in radius lengths)
+	* compactness (perimeter^2 / area - 1.0)
+	* concavity (severity of concave portions of the contour)
+	* concave points (number of concave portions of the contour)
+	* symmetry 
+	* fractal dimension ("coastline approximation" - 1)
+	
+
+* Let's look at the head and tail of the dataset
+
+```{r}
+
+head(cancer_data)
+
+tail(cancer_data)
+
+```
+
+# Data Pre-processing
+
+* Let's convert the Cancer column into a factor, because it was read in as a numeric attribute (1 is if the patient has cancer and 0 is if the patient does not have cancer)
+
+```{r}
+
+cancer_data$Cancer <- as.factor(cancer_data$Cancer)
+
+```
+
+* Let's now remove the irrelevant column of "id" from the dataset
+
+```{r}
+
+cancer_data <- cancer_data[ , !(colnames(cancer_data) %in% "id")]
+
+```
+
+* Let's verify if there are any missing values in the dataset
+
+```{r}
+
+sum(is.na(cancer_data))
+
+```
+
+* Split the dataset into train and test using using stratified sampling using the caret package
+
+```{r}
+
+library(caret)
+
+set.seed(1234)
+
+index_train <- createDataPartition(cancer_data$Cancer, p = 0.7, list = F)
+
+pre_train <- cancer_data[index_train, ]
+
+pre_test <- cancer_data[-index_train, ]
+
+```
+
+* Split the train_data data into train and validation data sets
+
+* We will use the validation dataset (unseen data) to build our stacked ensemble model
+
+```{r}
+
+index_val <- createDataPartition(pre_train$Cancer, p = 0.7, list = F)
+
+pre_train_2 <- pre_train[index_val, ]
+
+pre_val <- pre_train[-index_val, ]
+
+```
+
+* Standardize all the real valued variables in the dataset as some models we use might be impacted due to non standardized variables
+
+* Let's use the preProcess() function from the caret package to standardize the variables, using just the data points in the training data
+
+```{r}
+
+std_method <- preProcess(pre_train_2, method = c("center", "scale"))
+
+train_data <- predict(std_method, pre_train_2)
+  
+test_data <- predict(std_method, pre_test)
+
+val_data <- predict(std_method, pre_val)
+
+```
+
+
+# Building Multiple Models
+
+* Let's first start out building SVMs and Random Forest models, later let's use the algorithms we learnt from the entire module to build stacked ensemble models
+
+## Linear SVM
+
+* We can build the most basic linear SVM using the svm() function from the e1071 package
+
+```{r}
+
+library(e1071)
+
+model_svm <- svm(Cancer ~ . , train_data, kernel = "linear")
+
+summary(model_svm)
+
+```
+
+* From the output above, we can see that the linear SVM model could further be optimized using cross validation to get to the righ Cost value
+
+* This activity won't go into the details of hyper parameter tuning, but would instead focus on building ensemble learning algorithms
+
+* Let's now store the predictions on the validation data, as we'll need predictions from various models to build the stacked learning algorithm
+
+```{r}
+
+preds_svm <- predict(model_svm, val_data)
+
+confusionMatrix(preds_svm, val_data$Cancer)
+
+```
+
+* We'll also store the predictions of the model on the training data
+
+```{r}
+
+preds_train_svm <- predict(model_svm)
+
+```
+
+## Non-Linear SVMs
+
+* We can explore various kernel functions to project the data to higher dimensions to find the perfect linear classifying boundary in the higher dimension
+
+* We can access various non linear kernels from the kernlab package
+
+### Tanhdot kernel SVM
+
+* Below, we use the tanhdot kernel
+
+```{r}
+
+library(kernlab)
+
+model_svm_th <- ksvm(Cancer ~ . , train_data, kernel = "tanhdot")
+
+preds_svm_th <- predict(model_svm_th, val_data)
+
+confusionMatrix(preds_svm_th, val_data$Cancer)
+
+preds_train_svm_th <- predict(model_svm_th)
+
+```
+
+
+### Anovadot kernel SVM
+
+* Below, we use the Anovadot kernel
+
+```{r}
+
+model_svm_an <- ksvm(Cancer ~ . , train_data, kernel = "anovadot")
+
+preds_svm_an <- predict(model_svm_an, val_data)
+
+confusionMatrix(preds_svm_an, val_data$Cancer)
+
+preds_train_svm_an <- predict(model_svm_th)
+
+```
+
+## Random Forest
+
+* We can build a random forest model using the randomForest() function from the randomForest() package
+
+* Below, we use the default parameters to build the random forest model
+
+```{r}
+
+library(randomForest)
+
+model_rf <- randomForest(Cancer ~ . , train_data)
+
+```
+
+* We can also look at variable importance from the built model using the importance() function and visualise it using the varImpPlot() funcion
+
+```{r, fig.height=7, fig.width=5.5}
+
+importance(model_rf)
+
+varImpPlot(model_rf)
+
+```
+
+* Store predictions from the model
+
+```{r}
+
+preds_rf <- predict(model_rf, val_data)
+
+confusionMatrix(preds_rf, val_data$Cancer)
+
+preds_train_rf <- predict(model_rf)
+
+```
+
+
+## KNN
+
+* KNN is a powerful classifier that can understand local, smaller patterns in the data and hence we'll us it in our ensemble model
+
+* We'll build our KNN model, using the knn3() function from the caret package
+
+```{r}
+
+model_knn <- knn3(Cancer ~ . , train_data, k = 5)
+
+preds_k <- predict(model_knn, val_data)
+
+```
+
+* The predict function on the knn model returns probabilities for each of the two classes in the target variable, so we'll get to the class labels using the ifelse() function
+
+```{r}
+
+preds_knn <- ifelse(preds_k[, 1] > preds_k[, 2], 0, 1)
+
+confusionMatrix(preds_knn, val_data$Cancer)
+
+```
+
+* Store the predictions on the train data
+
+```{r}
+
+preds_train_k <- predict(model_knn, train_data)
+
+preds_train_knn <- ifelse(preds_train_k[, 1] > preds_train_k[, 2], 0, 1)
+
+```
+
+## Decision Trees
+
+* Let's now go ahead and build our CART decision tree using the rpart() function from the rpart() package
+
+```{r}
+
+library(rpart)
+
+model_dt <- rpart(Cancer ~ . , train_data)
+
+```
+
+* The predictions here too are probabilities for each of the two classes in the target variable
+
+```{r}
+
+preds_dt <- predict(model_dt, val_data)
+
+preds_tree <- ifelse(preds_dt[, 1] > preds_dt[, 2], 0, 1)
+
+confusionMatrix(preds_tree, val_data$Cancer)
+
+```
+
+* Store the predictions on the train data
+
+```{r}
+
+preds_train_dt <- predict(model_dt)
+
+preds_train_tree <- ifelse(preds_train_dt[, 1] > preds_train_dt[, 2], 0, 1)
+
+```
+
+
+## Bagged Decision Trees
+
+* Now, let's get to building multiple CART trees using the concept of bagging (Bootstrap Aggregation)
+
+* We do bagging using the bagging() function from the ipred package
+
+* The bagging() function provides the control argument, where we can mention the parameters for the rpart tree 
+
+```{r}
+
+library(ipred)
+
+set.seed(1234)
+
+model_tree_bag <- bagging(Cancer ~ . , data=train_data, control = rpart.control(cp = 0.01, xval = 10))
+
+```
+
+* Test the model on the validation data and store the predictions on both the test and validation data
+
+```{r}
+
+preds_tree_bag <- predict(model_tree_bag, val_data)
+
+confusionMatrix(preds_tree_bag, val_data$Cancer)
+
+preds_train_tree_bag <- predict(model_tree_bag)
+
+```
+
+
+## GBM Model
+
+* Let's now build the gradient boosting machines, ensemble model
+
+* Before we build the model, we'll convert the Cancer target variable to numeric type as we'll be using the bernoulli distribution parameter when using the gbm
+
+```{r}
+
+# Be careful when converting factors to numeric values as the levels are converted to numeric and not the original values themselves, so converting them to a character first and then into a numeric type is a better practice
+
+train_data$Cancer <- as.numeric(as.character(train_data$Cancer))
+
+val_data$Cancer <- as.numeric(as.character(val_data$Cancer))
+
+```
+
+* We build the gbm model using the gbm() function from the gbm package
+
+```{r}
+
+library(gbm)
+
+# cv.folds parameter tells the gbm function the number of folds to consider for validation internally
+
+# interaction.depth is analogous to model complexity and can be tuned for better results
+
+# Shrinkage is the learning rate
+
+# n.trees is the number of trees to build or the number of iterations, you have to specify a large enough number as the model itslef chooses the best point to stop
+
+# The bernoulli distribution tells gbm that the target has either a success (1) value or a failure value (0)
+
+model_gbm <- gbm(Cancer ~ . , cv.folds = 8, interaction.depth = 3, 
+                 shrinkage = 0.005, distribution= 'bernoulli',
+                 data = train_data, n.trees = 1600)
+
+```
+
+* The gbm.perf() function helps us visualise how the cross validation error rate and training error rate vary with the number of iterations
+
+```{r}
+
+gbm.perf(model_gbm)
+
+```
+
+* The returned predictions will be probabilities between 0 and 1, so we'll have to get the best cutoff value for predicting the classes, here we will be using the pROC package to get to the desired cutoff, we'll also store it for later use
+
+```{r}
+
+# Predictions on train data
+
+preds_g <- predict(model_gbm, type = 'response')
+
+library(pROC)
+
+# Let's create an roc object using the roc function
+
+gbm_roc <- roc(train_data$Cancer, preds_g)
+
+# Get to the cutoff value using the coords() function
+
+cutoff_gbm <- coords(gbm_roc, "best", ret = "threshold")
+
+```
+
+* Convert the predictions on the train data into class labels and store them, later store the predictions on the validation data too
+
+```{r}
+
+preds_train_gbm <- ifelse(preds_g >= cutoff_gbm, 1, 0)
+
+preds_val_g <- predict(model_gbm, val_data, type = 'response')
+
+preds_gbm <- ifelse(preds_val_g >= cutoff_gbm, 1, 0)
+
+confusionMatrix(preds_gbm, val_data$Cancer)
+
+```
+
+
+# Building a Stacked Ensemble
+
+* Before building a stacked ensemble model, we have to coallate all the predictions on the train and validation datasets into a dataframe
+
+```{r}
+
+# Getting all the predictions on the train data into a dataframe
+
+train_preds_df <- data.frame(svm = preds_train_svm, svm_th = preds_train_svm_th,
+                       svm_an = preds_train_svm_an, rf = preds_train_rf, knn = preds_train_knn,
+                       tree = preds_train_tree, tree_bag = preds_train_tree_bag,
+                       gbm = preds_train_gbm, Cancer = train_data$Cancer)
+
+# Getting all the predictions from the validation data into a dataframe
+
+val_preds_df <- data.frame(svm = preds_svm, svm_th = preds_svm_th,
+                       svm_an = preds_svm_an, rf = preds_rf, knn = preds_knn,
+                       tree = preds_tree, tree_bag = preds_tree_bag, gbm = preds_gbm,
+                       Cancer = val_data$Cancer)
+
+```
+
+* Combine those two dataframes together and convert the target variable into a factor
+
+```{r}
+
+stack_df <- rbind(train_preds_df, val_preds_df)
+
+stack_df$Cancer <- as.factor(stack_df$Cancer)
+
+
+```
+
+* Use the sapply() function to convert all the variables other than the target variable into a numeric type
+
+```{r}
+
+numeric_st_df <- sapply(stack_df[, !(names(stack_df) %in% "Cancer")], 
+                        function(x) as.numeric(as.character(x)))
+
+```
+
+* Now, since the outputs of the various models are extremely correlated let's use PCA to reduce the dimensionality of the dataset
+
+```{r}
+
+pca_stack <- prcomp(numeric_st_df, scale = F)
+
+# Transform the data into the principal components using the predict() fucntion and keep only 3 of the original components
+
+predicted_stack <- as.data.frame(predict(pca_stack, numeric_st_df))[1:3]
+
+# Now, add those columns to the target variable (Cancer) and convert it to a data frame
+
+stacked_df <- data.frame(predicted_stack, Cancer = stack_df[, (names(stack_df) %in% "Cancer")])
+
+```
+
+* We will be building a linear SVM on the dataset to predict the final target variable
+
+```{r}
+
+stacked_model <- svm(Cancer ~ . , stacked_df, kernel = "linear")
+
+```
+
+# Reporting Metrics for the Models on Test Data
+
+* Now, store the predictions of the various models on the test data
+
+```{r}
+
+# linear svm on test data
+
+svm_test <- predict(model_svm, test_data)
+
+# kenrel svms on test data
+
+svm_test_th <- predict(model_svm_th, test_data)
+
+svm_an_test <- predict(model_svm_an, test_data)
+
+# Random Forest test data
+
+rf_test <- predict(model_rf, test_data)
+
+# knn on test data
+
+knn_test <- ifelse(predict(model_knn, test_data)[, 1] >  predict(model_knn, test_data)[, 2], 0, 1)
+
+# CART tree on test data
+
+dt_test <- ifelse(predict(model_dt, test_data)[, 1] >  predict(model_dt, test_data)[, 2], 0, 1)
+
+# Bagged cart tree on test data
+
+bag_tree_test <- predict(model_tree_bag, test_data)
+
+# Convert the Cancer variable to a numeric, before using the gbm 
+
+test_data$Cancer <- as.numeric(as.character(test_data$Cancer))
+
+# GBM predictions on test data
+
+gbm_test <- ifelse(predict(model_gbm, test_data, type = 'response') >= cutoff_gbm, 1, 0)
+
+
+```
+
+* Store these predictions in a new data frame
+
+```{r}
+
+stack_df_test <- data.frame(svm = svm_test, svm_th = svm_test_th,
+                            svm_an = svm_an_test, rf = rf_test,
+                            knn = knn_test, tree = dt_test,
+                            tree_bag = bag_tree_test, gbm = gbm_test,
+                            Cancer = test_data$Cancer)
+
+# Convert the target variable into a factor
+
+stack_df_test$Cancer <- as.factor(stack_df_test$Cancer)
+
+```
+
+```{r}
+
+# Convert all other variables into numeric
+
+numeric_st_df_test <- sapply(stack_df_test[, !(names(stack_df_test) %in% "Cancer")],
+                        function(x) as.numeric(as.character(x)))
+
+# Apply dimensionality reduction on the numeric attributes
+
+predicted_stack_test <- as.data.frame(predict(pca_stack, numeric_st_df_test))[1:3]
+
+# Combine the target variable along with the reduced dataset
+
+stacked_df_test <- data.frame(predicted_stack_test, Cancer = stack_df_test[, (names(stack_df_test) %in% "Cancer")])
+
+```
+
+* Now, apply the stacked model on the above dataframe
+
+```{r}
+
+preds_st_test <-  predict(stacked_model, stacked_df_test)
+
+```
+
+* Use the confusionMatrix() function from the caret package to get the evaluation metrics on the test data for the various models built today
+
+```{r}
+
+# Linear SVM
+
+confusionMatrix(svm_test, test_data$Cancer)
+
+# Kernel SVMs
+
+confusionMatrix(svm_test_th, test_data$Cancer)
+
+confusionMatrix(svm_an_test, test_data$Cancer)
+
+# Random Forest
+
+confusionMatrix(rf_test, test_data$Cancer)
+
+# KNN
+
+confusionMatrix(knn_test, test_data$Cancer)
+
+# CART Tree
+
+confusionMatrix(dt_test, test_data$Cancer)
+
+# Bagged CART Trees
+
+confusionMatrix(bag_tree_test, test_data$Cancer)
+
+# GBM
+
+confusionMatrix(gbm_test, test_data$Cancer)
+
+# Stacked Model
+
+confusionMatrix(preds_st_test, stacked_df_test$Cancer)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
