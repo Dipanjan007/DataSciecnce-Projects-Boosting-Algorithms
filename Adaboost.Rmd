@@ -1,0 +1,206 @@
+---
+title: "Adaboost Algorithm"
+author: "Dipanjan"
+date: "10 June 2018"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+**NOTE** Before starting this assignment please remember to clear your environment, you can do that by running the following code chunk
+```{r}
+rm(list = ls(all = TRUE))
+```
+# Agenda 
+
+* Read and pre-process the data
+
+* Build a model using Adaboost
+
+* Make predictions and evaluate the results
+
+![](img/ada.png)
+![](img/eq.jpeg)
+
+# Dataset Schema
+
+ 1) ID                 - Customer ID
+ 2) Age                - Customers age in completed years
+ 3) Experience         - no. of years of professional experience
+ 4) Income             - Annual income of the customer 
+ 5) ZIPCode            - Home Address ZIP code
+ 6) Family             - Family size of the customer
+ 7) CCAvg              - Avg. spending on credit cards per month 
+ 8) Education          - Education Level 1: Undergrad; 2: Graduate; 3: Advanced/Professional
+ 9) Mortgage           - Value of house mortgage if any
+10) Personal Loan      - Did this customer accept the personal loan offered in the last campaign
+11) Securities Account - Does the customer have a securities account with the bank?
+12) CD Account         - Does the customer have a certificate of deposit (CD) account with the bank?
+13) Online             - Does the customer use internet banking facilities?
+14) CreditCard         - Does the customer use a credit card issued by the bank?
+
+* Load the required libraries
+```{r}
+library(vegan)
+library(ada) 
+library(caret)
+```
+* Creating a vector of attribute names and it will be used to rename the columns while reading the file.
+```{r}
+attr = c('id', 'age', 'exp', 'inc', 'zip', 'family', 
+         'ccavg', 'edu', 'mortgage', 'loan', 
+         'securities', 'cd', 'online', 'cc')
+```
+* Make sure the dataset is located in your current working directory and read in the data
+```{r}
+data = read.csv(file = "UniversalBank.csv", header = TRUE, col.names = attr)
+```
+* Structure of the Data
+```{r}
+str(data)
+```
+
+* Summary of the Data
+```{r}
+summary(data)
+```
+# Preprocessing the Data
+```{r}
+boxplot(exp~loan,data= data)
+```
+* Removing the id, zip and experience.
+```{r}
+drop_Attr = c("id", "zip", "exp")
+attr = setdiff(attr, drop_Attr)
+data = data[, attr]
+summary(data)
+
+# Removing the drop_Attr variable
+rm(drop_Attr)
+
+```
+* Listing the first and last 10 rows
+```{r}
+head(data, n = 10)
+tail(data, n = 10)
+```
+* Grouping the attribute names to categorical and numerical
+```{r}
+cat_Attr = c("family", "edu", "securities", "cd", "online", "cc", "loan")
+num_Attr = setdiff(attr, cat_Attr)
+
+rm(attr)
+```
+* Convert attribute to appropriate type 
+```{r}
+cat_Data <- data.frame(sapply(data[,cat_Attr], as.factor))
+num_Data <- data.frame(sapply(data[,num_Attr], as.numeric))
+
+rm(cat_Attr, num_Attr)
+```
+* Combining together all the attributes
+```{r}
+data = cbind(num_Data, cat_Data)
+
+rm(cat_Data, num_Data)
+```
+* Understanding the summary statistics
+```{r}
+summary(data)
+str(data)
+```
+* Check for missing values and outliers.
+```{r}
+sum(is.na(data))
+```
+* Creating the model matrix by converting every categorical variables to dummy variables
+```{r}
+numeric_data <- data.frame(model.matrix(data$loan~.,data))
+numeric_data <- numeric_data[,-1]
+str(numeric_data)
+```
+
+* Standardizing the numeric data
+```{r}
+cla_Data = decostand(numeric_data, "range")
+```
+* Append the Target attribute 
+```{r}
+cla_Data = cbind(cla_Data, loan=data[,"loan"]) 
+```
+* Understanding the summary statistics on the modified dataset
+```{r}
+summary(cla_Data)
+str(cla_Data)
+```
+# Divide the data into Train and Test
+```{r}
+set.seed(123)
+# train_RowIDs = sample(1:nrow(cla_Data), nrow(cla_Data)*0.6)
+# train_Data = cla_Data[train_RowIDs,]
+# test_Data = cla_Data[-train_RowIDs,]
+# table(cla_Data$loan)
+# table(train_Data$loan)
+# table(test_Data$loan)
+
+train_RowIDs = createDataPartition(cla_Data$loan, p = 0.6, list = FALSE)
+train_Data = cla_Data[train_RowIDs,]
+test_Data = cla_Data[-train_RowIDs,]
+
+rm(train_RowIDs)
+```
+* Verifying the proportion of target attribute.
+```{r}
+table(cla_Data$loan)
+table(train_Data$loan)
+table(test_Data$loan)
+```
+* Removing the target attribute from the train and test dataset
+```{r}
+colnames(train_Data)
+train_Data_wo_target <- train_Data[,-which(names(train_Data) %in% c("loan"))]
+test_Data_wo_target <- test_Data[,-which(names(train_Data) %in% c("loan"))]
+```
+# Build the Ada boost model 
+```{r}
+model = ada(x = train_Data_wo_target, 
+            y = train_Data$loan, 
+            iter=50, loss="exponential", type= "discrete", nu= 0.4)
+```
+* Look at the model summary
+```{r}
+model
+summary(model)
+```
+# Predict on train data  
+```{r}
+pred_Train  =  predict(model, train_Data_wo_target)  
+```
+* Build confusion matrix and find accuracy   
+```{r}
+cm_Train = table(train_Data$loan, pred_Train)
+accu_Train= sum(diag(cm_Train))/sum(cm_Train)
+cm_Train
+cat("Accuracy on the training data:", accu_Train)
+
+rm(pred_Train, cm_Train)
+```
+# Predict on Test data
+```{r}
+pred_Test = predict(model, test_Data_wo_target) 
+```
+* Build confusion matrix and find accuracy   
+```{r}
+cm_Test = table(test_Data$loan, pred_Test)
+accu_Test= sum(diag(cm_Test))/sum(cm_Test)
+cm_Test
+
+cat("Accuracy on the Testing data:", accu_Test)
+
+rm(pred_Test, cm_Test)
+```
